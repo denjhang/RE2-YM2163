@@ -1,0 +1,793 @@
+
+                                                                     PAGE    1
+              ;** CMOS MIDI INTERFACE    80413
+              ;   MIA 42 / MARS 21
+              ;   COMPUTER MUSIC OPERATION SYSTEM
+              ;   CODED BY SUZUKI  FOR YM2163 DSG SYSTEM
+              ;
+              ;PGM ON (KBC-80SA) Z-80 BOAD
+              ;
+6000          RAMS:  EQU  6000H         ;RAM FOR WORKING
+67FF          RAME:  EQU  67FFH         ;RAM END OF 6116
+0000          ROM0:  EQU  0000H         ;PGM AND DATA ROM 2716
+              ;
+0004          PIO1:  EQU  04H           ;8255 ON CPU-BOAD
+              ;        +0 (A):(OUT)
+              ;        +1 (B):IN  CH. SW    .... cccc
+              ;        +2 (C):IN  TONE SW   .ees wwww
+              ;        +3 CTRL.
+              ;
+0080          SIOD:  EQU  80H           ;USART DATA FOR MIDI
+0081          SIOC:  EQU  81H           ;USART CTRL.
+              ;
+0082          DSG0:  EQU  82H           ;YM2163 DSG NO.0
+0084          DSG1:  EQU  84H           ;       DSG NO.1
+              ;
+              ;
+                     ORG  RAMS+10H
+6010          TBLB:  DS   4             ;WORKING
+              ;TBLB+0 :KEY TABLE PIONTER STORE
+              ;TBLB+1 :
+              ;TBLB+2 :
+              ;TBLB+3 :
+6014          CHNB:  DS   1             ;+4 RX CHANNEL NO.
+6015          ANFB:  DS   1             ;+5 ALL NOTE OFF FLG.
+6016          TONB:  DS   1             ;+6 USING TONE DATA
+6017          OMNB:  DS   1             ;+7 OMNI MASK
+              ;
+6018          MODB:  DS   1             ;+8 ACTIVE MODE FLG.
+              ;        BIT0  CH.1 NOTE ACTIVE
+              ;           1
+              ;           2  NOTE ON/OFF
+              ;           3
+              ;           4
+              ;           5
+              ;           6
+              ;           7  CH.CTRL.
+              ;
+6019          BKNB:  DS   1             ;+9 USING BLOCK NO.
+              ;        BIT0  BLOCK NO.
+              ;           1  BLOCK NO.
+              ;           2  IC NO.
+              ;           3
+              ;           4
+              ;           5
+              ;           6  IGNORE
+              ;           7  BLOCK NOT FOUND
+              ;
+                     ORG  TBLB+10H
+6020          TASG:  DS   8             ;+0  TONE AGE
+6028                 DS   8             ;+8  KEY NUM.
+6030                 DS   8             ;+16 F-NUM2 STORE
+6038                 DS   8             ;+24 F-NUM1 STORE
+              ;
+              ;
+
+
+
+                                                                     PAGE    2
+0090          DNON:  EQU  90H           ;MIDI NOTE ON
+0080          DNOF:  EQU  80H           ;MIDI NOTE OFF
+00B0          DCHC:  EQU  0B0H          ;MIDI CHANNEL CTRL
+00F8          DRTM:  EQU  0F8H          ;MIDI REAL TIME MESS.
+              ;
+007B          DANF:  EQU  123           ;ALL NOTE OFF
+0040          DSUS:  EQU  64            ;SUST. ON/OFF
+              ;
+              ;
+              ;** PGM ON ROM0
+              ;
+              ;PGM START
+                     ORG  0000H
+0000 F3       RST0:  DI
+0001 C3B902          JP   PINI          ;GOTO INIT.PGM
+              ;
+0004 204D4941        DB   ' MIA42 80413'
+0008 34322038
+000C 30343133
+              ;
+                     ORG  0038H
+0038 F3       RST7:  DI
+0039 D9              EXX
+003A 08              EX   AF,AF'
+              ;
+003B DB80            IN   A,(SIOD)      ;MIDI DATA READ
+003D D380            OUT  (SIOD),A      ;* COPY DATA OUT
+              ;
+003F CB7F            BIT  7,A           ;STATUS OR PARAM.
+0041 CA7B00          JP   Z,PPRM        ;PARAM ?
+              ;
+0044 FEFF            CP   0FFH          ;RESET ?
+0046 CAB902          JP   Z,PINI
+0049 FEF8            CP   DRTM          ;REAL TIME MESS ?
+004B D29901          JP   NC,IRET       ;F8-FE THEN IGNORE
+              ;
+004E 0E00            LD   C,0
+0050 47              LD   B,A
+0051 3A1460          LD   A,(CHNB)      ;CHANNEL CHECK
+0054 A8              XOR  B
+0055 E60F            AND  0FH
+0057 C26D00          JP   NZ,JCFS
+              ;
+005A 78              LD   A,B
+005B E6F0            AND  0F0H          ;COMMAND
+005D FEB0            CP   DCHC          ;MODE MESS.?
+005F 3015            JR   NC,JMDS
+0061 FE80            CP   DNOF          ;NOTE OFF?
+0063 2806            JR   Z,JCHC        ;
+0065 FE90            CP   DNON          ;NOTE ON?
+0067 2004            JR   NZ,JCFS
+0069 0E04            LD   C,04H         ;BIT2 SET FOR NOTE ON
+006B CBC1     JCHC:  SET  0,C           ;CH.1 ACTIVE
+006D 79       JCFS:  LD   A,C
+006E 321860          LD   (MODB),A
+0071 1E02            LD   E,2
+0073 C39901          JP   IRET
+              ;
+0076 0E80     JMDS:  LD   C,80H         ;BIT7 SET FOR CH.CTRL.
+0078 C36D00          JP   JCFS
+              ;
+              ;PARAM. PROSESS
+
+
+
+                                                                     PAGE    3
+007B 1D       PPRM:  DEC  E
+007C C2AD01          JP   NZ,JKNO       ;PARAM IS 1ST PARAM.
+007F 57              LD   D,A
+              ;
+0080 3A1860          LD   A,(MODB)
+0083 CB7F            BIT  7,A
+0085 C26101          JP   NZ,PCTL       ;COMMAND IS MODE/CTRL.
+0088 0F              RRCA               ;BIT 0 SET?
+0089 D29701          JP   NC,PNOE       ;NOT CH.1 THEN QUIT
+008C 0F              RRCA
+008D 0F              RRCA               ;BIT 2 SET?
+008E D21801          JP   NC,PNOF       ;COMMAND IS NOTE OFF
+              ;
+0091 7A              LD   A,D
+0092 A7              AND  A
+0093 CA1801          JP   Z,PNOF        ;VELO=0 THEN NOTE OFF
+              ;NOTE ON PROSESS
+0096 3A1960          LD   A,(BKNB)
+0099 47              LD   B,A
+009A E603            AND  03H
+009C 5F              LD   E,A           ;E=BLOCK NO.
+009D DD2A1060        LD   IX,(TBLB)
+              ;
+00A1 0E82            LD   C,DSG0
+00A3 CB50            BIT  2,B           ;IC NO.0?
+00A5 2802            JR   Z,JDIA
+00A7 0E84            LD   C,DSG1
+              ;
+00A9 C680     JDIA:  ADD  A,80H         ;F-NUM1 REG.
+00AB ED79            OUT  (C),A
+00AD CD9D01          CALL SWT1          ;**
+00B0 DD7E18          LD   A,(IX+24)     ;OLD F-NUM1
+00B3 ED79            OUT  (C),A
+00B5 CDA501          CALL SWT2          ;**
+              ;
+00B8 DD7508          LD   (IX+8),L      ;KEY NUM
+00BB DD360000        LD   (IX),0        ;TONE AGE
+00BF 3E07            LD   A,07H         ;LED ON (DTR=L)
+00C1 D381            OUT  (SIOC),A
+00C3 CB78            BIT  7,B           ;SAME KEY?
+00C5 2812            JR   Z,JSON
+              ;
+              ;STOP OLD NOTE
+00C7 7B              LD   A,E
+00C8 C684            ADD  A,84H         ;F-NUM2 REG.
+00CA ED79            OUT  (C),A
+00CC CD9D01          CALL SWT1          ;**
+00CF DD7E10          LD   A,(IX+16)     ;OLD F-NUM2
+00D2 F620            OR   20H           ;FD ON FOR KEY OFF
+00D4 ED79            OUT  (C),A
+00D6 CDA501          CALL SWT2          ;**
+              ;
+              ;VOL. SET
+00D9 7B       JSON:  LD   A,E
+00DA C68C            ADD  A,8CH         ;VOL.FILT. REG.
+00DC ED79            OUT  (C),A
+00DE CD9D01          CALL SWT1          ;**
+00E1 7A              LD   A,D           ;0vvv vvvv
+00E2 0F              RRCA
+00E3 0F              RRCA
+00E4 0F              RRCA               ;.... vvvv
+00E5 E60F            AND  0FH           ;0000 vvvv
+
+
+
+                                                                     PAGE    4
+00E7 2001            JR   NZ,JVOL
+00E9 3C              INC  A             ;1<=A<=15
+00EA ED79     JVOL:  OUT  (C),A
+00EC CDA501          CALL SWT2          ;**
+              ;
+              ;NEW FREQ. SET AND KEY ON
+00EF CB78            BIT  7,B           ;SAME KEY?
+00F1 2811            JR   Z,JFRQ
+              ;
+00F3 7B              LD   A,E
+00F4 C680            ADD  A,80H         ;F-NUM.1 REG.
+00F6 ED79            OUT  (C),A
+00F8 CD9D01          CALL SWT1          ;**
+00FB 7E              LD   A,(HL)        ;NEW F-NUM1
+00FC DD7718          LD   (IX+24),A
+00FF ED79            OUT  (C),A
+0101 CDA501          CALL SWT2          ;**
+              ;
+0104 23       JFRQ:  INC  HL
+0105 7B              LD   A,E
+0106 C684            ADD  A,84H         ;F-NUM2 REG.
+0108 ED79            OUT  (C),A
+010A CD9D01          CALL SWT1          ;**
+010D 7E              LD   A,(HL)        ;NEW F-NUM2
+010E DD7710          LD   (IX+16),A
+0111 F640            OR   40H           ;BIT 6 SET FOR KEY ON
+0113 ED79            OUT  (C),A
+0115 C39701          JP   PNOE
+              ;
+              ;NOTE OFF PROSESS
+0118 3A1960   PNOF:  LD   A,(BKNB)
+011B CB7F            BIT  7,A
+011D 2078            JR   NZ,PNOE       ;NOT FOUND THEN QUIT
+              ;
+011F DD2A1060        LD   IX,(TBLB)
+0123 DD360080        LD   (IX),80H      ;NOTE OFF AGE
+              ;
+0127 0E82            LD   C,DSG0
+0129 CB57            BIT  2,A           ;IC NO.0?
+012B 2802            JR   Z,JDIB
+012D 0E84            LD   C,DSG1
+012F E603     JDIB:  AND  03H           ;A=BLOCK NO.
+0131 5F              LD   E,A
+0132 C680            ADD  A,80H         ;F-NUM1 REG.
+0134 ED79            OUT  (C),A
+0136 CD9D01          CALL SWT1          ;**
+0139 DD7E18          LD   A,(IX+24)     ;OLD F-NUM1
+013C ED79            OUT  (C),A
+013E CDA501          CALL SWT2          ;**
+0141 7B              LD   A,E
+0142 C684            ADD  A,84H         ;F-NUM2 REG
+0144 ED79            OUT  (C),A
+0146 CD9D01          CALL SWT1          ;**
+0149 DD7E10          LD   A,(IX+16)     ;OLD F-NUM2
+014C ED79            OUT  (C),A
+              ;
+              ;LED ON/OFF CHECK
+014E 0608            LD   B,8
+0150 212060          LD   HL,TASG
+0153 7E       LLED:  LD   A,(HL)
+0154 07              RLCA               ;BIT 7 ?
+0155 3040            JR   NC,PNOE       ;AGE<80 WHEN ACTIVE
+
+
+
+                                                                     PAGE    5
+0157 2C              INC  L
+0158 10F9            DJNZ LLED
+              ;
+015A 3E05            LD   A,05H         ;LED OFF (DTR=H)
+015C D381            OUT  (SIOC),A
+015E C39701          JP   PNOE
+              ;
+              ;CHANNEL CTRL.
+0161 79       PCTL:  LD   A,C
+              ;
+0162 FE7B            CP   DANF          ;ALL NOTE OFF?
+0164 302B            JR   NC,JMOD
+0166 FE40            CP   DSUS          ;SUST. ON/OFF?
+0168 202D            JR   NZ,PNOE
+              ;
+016A 7A              LD   A,D           ;A=2ND PARAM.
+016B A7              AND  A             ;SUST ON?
+016C 2802            JR   Z,JSUS
+016E 1610            LD   D,10H         ;BIT 4 SET FOR SUST. ON
+0170 3A1660   JSUS:  LD   A,(TONB)
+0173 E667            AND  67H           ;_**_ _***
+0175 B2              OR   D
+0176 57              LD   D,A
+0177 0604            LD   B,4
+0179 0E88            LD   C,88H         ;TONE REG. ADDR.
+017B 79       LSUS:  LD   A,C
+017C D382            OUT  (DSG0),A
+017E D384            OUT  (DSG1),A
+0180 CD9D01          CALL SWT1          ;**
+0183 0C              INC  C
+0184 7A              LD   A,D
+0185 D382            OUT  (DSG0),A
+0187 D384            OUT  (DSG1),A
+0189 CDA501          CALL SWT2          ;**
+018C 10ED            DJNZ LSUS
+018E C39701          JP   PNOE
+              ;
+0191 321560   JMOD:  LD   (ANFB),A      ;ALL NOTE OFF SET
+0194 C39701          JP   PNOE
+              ;
+              ;NOTE PROSESS END
+0197 1E02     PNOE:  LD   E,2
+              ;IRQ RETURN
+0199 D9       IRET:  EXX
+019A 08              EX   AF,AF'
+019B FB              EI
+019C C9              RET
+              ;
+              ;TIME WAIT SUBROU.
+019D F5       SWT1:  PUSH AF
+019E 3E05            LD   A,5
+01A0 3D       LWT1:  DEC  A
+01A1 20FD            JR   NZ,LWT1
+01A3 F1              POP  AF
+01A4 C9              RET
+              ;
+01A5 F5       SWT2:  PUSH AF
+01A6 3E0A            LD   A,10
+01A8 3D       LWT2:  DEC  A
+01A9 20FD            JR   NZ,LWT2
+01AB F1              POP  AF
+01AC C9              RET
+
+
+
+                                                                     PAGE    6
+              ;
+              ;FIRST PARAM PROSESS
+01AD 4F       JKNO:  LD   C,A           ;C=1ST. PARAM.
+01AE 3A1860          LD   A,(MODB)
+01B1 CB7F            BIT  7,A
+01B3 20E4            JR   NZ,IRET       ;CH.CTRL
+01B5 0F              RRCA               ;BIT 0 SET?
+01B6 3055            JR   NC,JKNQ       ;NOT CH.1 THEN QUIT
+              ;
+01B8 DB06            IN   A,(PIO1+2)    ;TONE SW READ
+01BA E60F            AND  0FH
+01BC FE05            CP   5
+01BE 79              LD   A,C
+01BF 3802            JR   C,JSKS        ;IF SW>4 THEN OCT.DOWN
+01C1 D60C            SUB  12
+01C3 87       JSKS:  ADD  A,A
+01C4 4F              LD   C,A           ;C=KEY*2
+              ;
+              ;SAME KEY SERCH
+01C5 DD212060        LD   IX,TASG
+01C9 0608            LD   B,8
+01CB 79              LD   A,C
+01CC DDBE08   LSKS:  CP   (IX+8)        ;SAME KEY?
+01CF 2824            JR   Z,JSNF        ;SAME FOUND
+01D1 DD23            INC  IX
+01D3 10F7            DJNZ LSKS
+              ;
+              ;SEARCH AGED BLOCK TO BE USED
+01D5 212060          LD   HL,TASG
+01D8 0608            LD   B,8
+01DA 50              LD   D,B           ;DUMMY SET
+01DB AF              XOR  A
+01DC BE       LSAB:  CP   (HL)
+01DD 3005            JR   NC,JSAY
+01DF 7E              LD   A,(HL)        ;AGE OLDER
+01E0 50              LD   D,B           ;D=OLDER BLOCK NO.
+01E1 221060          LD   (TBLB),HL     ;POINTER STORE
+01E4 34       JSAY:  INC  (HL)          ;AGE=AGE+1
+01E5 23              INC  HL
+01E6 10F4            DJNZ LSAB
+              ;
+01E8 7A              LD   A,D
+01E9 3D              DEC  A
+01EA F680            OR   80H           ;BIT 7 SET FOR NOT FOUND
+01EC 321960          LD   (BKNB),A
+01EF 2604            LD   H,TKNF.R8
+01F1 69              LD   L,C           ;(HL)=FREQ DATA
+01F2 C39901          JP   IRET
+              ;
+01F5 DD221060 JSNF:  LD   (TBLB),IX
+01F9 78              LD   A,B
+01FA 3D              DEC  A
+01FB 321960          LD   (BKNB),A
+              ;
+01FE 212060          LD   HL,TASG
+0201 0608            LD   B,8
+0203 34       LAGE:  INC  (HL)          ;AGE=AGE+1
+0204 23              INC  HL
+0205 10FC            DJNZ LAGE
+              ;
+0207 2604            LD   H,TKNF.R8
+0209 69              LD   L,C           ;(HL)=FREQ DATA
+
+
+
+                                                                     PAGE    7
+020A C39901          JP   IRET
+              ;
+020D 3EC0     JKNQ:  LD   A,0C0H        ;BIT 6,7 SET
+020F 321960          LD   (BKNB),A      ;IGNORE SET
+0212 C39901          JP   IRET
+              ;
+              ;
+              ;MAIN PGM (PANEL SW CHECK,ALL NOTE OFF)
+              ;
+0215 3A1560   PMPG:  LD   A,(ANFB)
+0218 A7              AND  A             ;ALL NOTE OFF?
+0219 2013            JR   NZ,PANF
+              ;
+021B 3A1460          LD   A,(CHNB)      ;CHANNEL CHECK
+021E 47              LD   B,A
+021F DB05            IN   A,(PIO1+1)    ;PORT B:CH.SW READ
+0221 E60F            AND  0FH
+0223 B8              CP   B             ;SAME CHANNEL?
+0224 CA7E02          JP   Z,JTSW
+0227 321460          LD   (CHNB),A      ;NEW CHANNEL
+022A AF              XOR  A
+022B 321860          LD   (MODB),A      ;MODE RESET
+              ;
+022E FD212060 PANF:  LD   IY,TASG
+0232 0604            LD   B,4
+0234 78       LANA:  LD   A,B
+0235 C67F            ADD  A,80H-1       ;F-NUM1 REG.
+0237 F3              DI
+0238 D382            OUT  (DSG0),A
+023A D384            OUT  (DSG1),A
+023C CD9D01          CALL SWT1          ;**
+023F FD7E18          LD   A,(IY+24)     ;OLD F-NUM1
+0242 D382            OUT  (DSG0),A
+0244 FD7E1C          LD   A,(IY+28)
+0247 D384            OUT  (DSG1),A
+0249 FB              EI
+024A CDA501          CALL SWT2          ;**
+              ;
+024D FD360080        LD   (IY),80H
+0251 FD360480        LD   (IY+4),80H
+              ;
+0255 78              LD   A,B
+0256 C683            ADD  A,84H-1       ;F-NUM2 REG.
+0258 F3              DI
+0259 D382            OUT  (DSG0),A
+025B D384            OUT  (DSG1),A
+025D CD9D01          CALL SWT1          ;**
+0260 FD7E10          LD   A,(IY+16)     ;OLD F-NUM2
+0263 F620            OR   20H           ;BIT 5 SET FOR FD ON
+0265 D382            OUT  (DSG0),A
+0267 FD7E14          LD   A,(IY+20)
+026A F620            OR   20H
+026C D384            OUT  (DSG1),A
+026E FB              EI
+026F CDA501          CALL SWT2          ;**
+0272 FD23            INC  IY
+0274 10BE            DJNZ LANA
+              ;
+0276 3E05            LD   A,05H         ;LED OFF (DTR=H)
+0278 D381            OUT  (SIOC),A
+027A AF              XOR  A
+027B 321560          LD   (ANFB),A
+
+
+
+                                                                     PAGE    8
+              ;
+027E 3A1660   JTSW:  LD   A,(TONB)      ;TONE SW CHECK
+0281 47              LD   B,A
+              ;
+0282 DB06            IN   A,(PIO1+2)    ;PORT C:TONE SW READ
+0284 5F              LD   E,A
+0285 E60F            AND  0FH           ;____ ****
+0287 FE05            CP   5             ;IF DAT>4 ?
+0289 3802            JR   C,JTSC
+028B D605            SUB  5
+028D 3C       JTSC:  INC  A
+028E E607            AND  07H           ;____ _***
+0290 57              LD   D,A
+0291 7B              LD   A,E
+0292 E670            AND  70H           ;_*** ____
+0294 B2              OR   D             ;_*** _***
+0295 B8              CP   B             ;SAME TONE?
+0296 CA1502          JP   Z,PMPG
+              ;
+0299 321660          LD   (TONB),A      ;NEW TONE NO.
+              ;
+029C 5F              LD   E,A
+029D 1688            LD   D,88H         ;TONE REG.TOP
+029F 0604            LD   B,4
+02A1 7A       LTDW:  LD   A,D
+02A2 F3              DI
+02A3 D382            OUT  (DSG0),A      ;REG. ADDR.
+02A5 D384            OUT  (DSG1),A
+02A7 CD9D01          CALL SWT1          ;**
+02AA 14              INC  D
+02AB 7B              LD   A,E
+02AC D382            OUT  (DSG0),A
+02AE D384            OUT  (DSG1),A
+02B0 CDA501          CALL SWT2          ;**
+              ;
+02B3 FB              EI
+02B4 10EB            DJNZ LTDW
+              ;
+02B6 C31502          JP   PMPG
+              ;
+              ;
+              ;INIT PGM. FOR SYSTEM SETUP
+              ;
+02B9 31FD67   PINI:  LD   SP,RAME-2
+02BC ED56            IM   1
+              ;
+02BE 3EFF            LD   A,0FFH
+02C0 321460          LD   (CHNB),A      ;DUMMY SET
+02C3 321660          LD   (TONB),A      ;DUMMY SET
+02C6 321760          LD   (OMNB),A      ;OMNI OFF
+02C9 AF              XOR  A
+02CA 321960          LD   (BKNB),A
+02CD 321860          LD   (MODB),A
+02D0 321560          LD   (ANFB),A
+              ;
+02D3 D381            OUT  (SIOC),A      ;USART DUMMY SET
+02D5 00              NOP
+02D6 D381            OUT  (SIOC),A      ;USART DUMMY SET
+02D8 00              NOP
+02D9 D381            OUT  (SIOC),A      ;USART DUMMY SET
+02DB 3E50            LD   A,50H
+02DD D381            OUT  (SIOC),A      ;USART RESET
+
+
+
+                                                                     PAGE    9
+02DF 3E4E            LD   A,4EH
+02E1 D381            OUT  (SIOC),A      ;USART ASYNC,1/16,8BIT
+              ;
+02E3 168C            LD   D,8CH         ;DSG OUT FILT./VOL.
+02E5 0604            LD   B,4
+02E7 7A       LINI:  LD   A,D
+02E8 D382            OUT  (DSG0),A
+02EA D384            OUT  (DSG1),A
+02EC CD9D01          CALL SWT1          ;**
+02EF 14              INC  D
+02F0 3E07            LD   A,07H         ;VOL. MID
+02F2 D382            OUT  (DSG0),A
+02F4 D384            OUT  (DSG1),A
+02F6 CDA501          CALL SWT2          ;**
+02F9 10EC            DJNZ LINI
+              ;
+02FB 0608            LD   B,8
+02FD FD212060        LD   IY,TASG
+0301 FD360801 LKNI:  LD   (IY+8),1      ;KEY NUM DUMMY
+0305 DD361000        LD   (IX+16),0     ;F-NUM1 DUMMY
+0309 FD23            INC  IY
+030B 10F4            DJNZ LKNI
+              ;
+030D 3E8B            LD   A,8BH         ;8255 A:OUT,B:IN,C:IN
+030F D307            OUT  (PIO1+3),A
+              ;
+0311 3E05            LD   A,05H
+0313 D381            OUT  (SIOC),A      ;USART RX ENABLE
+0315 FB              EI
+0316 C31502          JP   PMPG
+              ;
+              ;
+              ;FREQ. DIVIDE DATA (A=442Hz)
+              ;  0..B BFFF 0FFF FFFF
+                     ORG  ROM0+400H     ;DSG FREQ DATA TABLE
+0400 37070207 TKNF:  DW   0737H,0702H,064FH       ;00-10(0'
+0404 4F06
+0406 20067305        DW   0620H,0573H,0549H,0521H
+040A 49052105
+040E 7B045704        DW   047BH,0457H,0436H,0416H
+0412 36041604
+0416 70073707        DW   0770H,0737H,0702H,064FH ;11-22(0'
+041A 02074F06
+041E 20067305        DW   0620H,0573H,0549H,0521H
+0422 49052105
+0426 7B045704        DW   047BH,0457H,0436H,0416H
+042A 36041604
+042E 70073707        DW   0770H,0737H,0702H,064FH ;23-34(0'
+0432 02074F06
+0436 20067305        DW   0620H,0573H,0549H,0521H
+043A 49052105
+043E 7B045704        DW   047BH,0457H,0436H,0416H
+0442 36041604
+              ;
+0446 70073707        DW   0770H,0737H,0702H,064FH ;35-46(0
+044A 02074F06
+044E 20067305        DW   0620H,0573H,0549H,0521H
+0452 49052105
+0456 7B045704        DW   047BH,0457H,0436H,0416H
+045A 36041604
+045E 700F370F        DW   0F70H,0F37H,0F02H,0E4FH ;47-58(1
+0462 020F4F0E
+
+
+
+                                                                     PAGE   10
+0466 200E730D        DW   0E20H,0D73H,0D49H,0D21H
+046A 490D210D
+046E 7B0C570C        DW   0C7BH,0C57H,0C36H,0C16H
+0472 360C160C
+0476 70173717        DW   1770H,1737H,1702H,164FH ;59-70(2
+047A 02174F16
+047E 20167315        DW   1620H,1573H,1549H,1521H
+0482 49152115
+0486 7B145714        DW   147BH,1457H,1436H,1416H
+048A 36141614
+048E 701F371F        DW   1F70H,1F37H,1F02H,1E4FH ;71-82(3
+0492 021F4F1E
+0496 201E731D        DW   1E20H,1D73H,1D49H,1D21H
+049A 491D211D
+049E 7B1C571C        DW   1C7BH,1C57H,1C36H,1C16H
+04A2 361C161C
+              ;
+04A6 781B5C1B        DW   1B78H,1B5CH,1B41H       ;83-85(3
+04AA 411B
+              ;
+04AC 4F1E201E        DW   1E4FH,1E20H,1D73H,1D49H ;86-97(3'
+04B0 731D491D
+04B4 211D7B1C        DW   1D21H,1C7BH,1C57H,1C36H
+04B8 571C361C
+04BC 161C781B        DW   1C16H,1B78H,1B5CH,1B41H
+04C0 5C1B411B
+04C4 4F1E201E        DW   1E4FH,1E20H,1D73H,1D49H ;98-109(3'
+04C8 731D491D
+04CC 211D7B1C        DW   1D21H,1C7BH,1C57H,1C36H
+04D0 571C361C
+04D4 161C781B        DW   1C16H,1B78H,1B5CH,1B41H
+04D8 5C1B411B
+04DC 4F1E201E        DW   1E4FH,1E20H,1D73H,1D49H ;110-121(3'
+04E0 731D491D
+04E4 211D7B1C        DW   1D21H,1C7BH,1C57H,1C36H
+04E8 571C361C
+04EC 161C781B        DW   1C16H,1B78H,1B5CH,1B41H
+04F0 5C1B411B
+04F4 4F1E201E        DW   1E4FH,1E20H,1D73H,1D49H ;122-127(3'
+04F8 731D491D
+04FC 211D7B1C        DW   1D21H,1C7BH
+              ;
+              ;
+0500                 END
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                     PAGE   11
+
+ANFB   6015  0191 0215 027B 02D0
+BKNB   6019  0096 0118 01EC 01FB 020F 02CA
+CHNB   6014  0051 021B 0227 02C0
+DANF   007B  0162
+DCHC   00B0  005D
+DNOF   0080  0061
+DNON   0090  0065
+DRTM   00F8  0049
+DSG0   0082  00A1 0127 017C 0185 0238 0242 0259 0265 02A3 02AC
+             02E8 02F2
+DSG1   0084  00A7 012D 017E 0187 023A 0247 025B 026C 02A5 02AE
+             02EA 02F4
+DSUS   0040  0166
+IRET   0199  004B 0073 01B3 01F2 020A 0212
+JCFS   006D  0057 0067 0078
+JCHC   006B  0063
+JDIA   00A9  00A5
+JDIB   012F  012B
+JFRQ   0104  00F1
+JKNO   01AD  007C
+JKNQ   020D  01B6
+JMDS   0076  005F
+JMOD   0191  0164
+JSAY   01E4  01DD
+JSKS   01C3  01BF
+JSNF   01F5  01CF
+JSON   00D9  00C5
+JSUS   0170  016C
+JTSC   028D  0289
+JTSW   027E  0224
+JVOL   00EA  00E7
+LAGE   0203  0205
+LANA   0234  0274
+LINI   02E7  02F9
+LKNI   0301  030B
+LLED   0153  0158
+LSAB   01DC  01E6
+LSKS   01CC  01D3
+LSUS   017B  018C
+LTDW   02A1  02B4
+LWT1   01A0  01A1
+LWT2   01A8  01A9
+MODB   6018  006E 0080 01AE 022B 02CD
+OMNB   6017  02C6
+PANF   022E  0219
+PCTL   0161  0085
+PINI   02B9  0001 0046
+PIO1   0004  01B8 021F 0282 030F
+PMPG   0215  0296 02B6 0316
+PNOE   0197  0089 0115 011D 0155 015E 0168 018E 0194
+PNOF   0118  008E 0093
+PPRM   007B  0041
+RAME   67FF  02B9
+RAMS   6000  0000
+ROM0   0000  0319
+RST0   0000
+RST7   0038
+SIOC   0081  00C1 015C 0278 02D3 02D6 02D9 02DD 02E1 0313
+SIOD   0080  003B 003D
+SWT1   019D  00AD 00CC 00DE 00F8 010A 0136 0146 0180 023C 025D
+             02A7 02EC
+
+
+
+                                                                     PAGE   12
+SWT2   01A5  00B5 00D6 00EC 0101 013E 0189 024A 026F 02B0 02F6
+TASG   6020  0150 01C5 01D5 01FE 022E 02FD
+TBLB   6010  601A 009D 011F 01E1 01F5
+TKNF   0400  01EF 0207
+TONB   6016  0170 027E 0299 02C3
+
+RAMS   6000    RAME   67FF    ROM0   0000    PIO1   0004    SIOD   0080
+SIOC   0081    DSG0   0082    DSG1   0084    TBLB   6010    CHNB   6014
+ANFB   6015    TONB   6016    OMNB   6017    MODB   6018    BKNB   6019
+TASG   6020    DNON   0090    DNOF   0080    DCHC   00B0    DRTM   00F8
+DANF   007B    DSUS   0040    RST0   0000    RST7   0038    JCHC   006B
+JCFS   006D    JMDS   0076    PPRM   007B    JDIA   00A9    JSON   00D9
+JVOL   00EA    JFRQ   0104    PNOF   0118    JDIB   012F    LLED   0153
+PCTL   0161    JSUS   0170    LSUS   017B    JMOD   0191    PNOE   0197
+IRET   0199    SWT1   019D    LWT1   01A0    SWT2   01A5    LWT2   01A8
+JKNO   01AD    JSKS   01C3    LSKS   01CC    LSAB   01DC    JSAY   01E4
+JSNF   01F5    LAGE   0203    JKNQ   020D    PMPG   0215    PANF   022E
+LANA   0234    JTSW   027E    JTSC   028D    LTDW   02A1    PINI   02B9
+LINI   02E7    LKNI   0301    TKNF   0400
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
